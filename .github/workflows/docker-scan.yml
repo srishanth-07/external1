@@ -1,0 +1,52 @@
+name: Docker Build & Vulnerability Scan
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t sample:${{ github.sha }} .
+
+      - name: Run Trivy Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: sample:${{ github.sha }}
+          format: json
+          output: trivy-report.json
+          severity: HIGH,CRITICAL,MEDIUM,LOW
+
+      - name: Upload Scan Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-report
+          path: trivy-report.json
+
+      - name: Show summary with mitigation
+        run: |
+          sudo apt-get install -y jq
+          TOTAL=$(jq '.Results[].Vulnerabilities | length' trivy-report.json | awk '{s+=$1} END {print s}')
+          CRIT=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-report.json)
+          HIGH=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-report.json)
+          MED=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' trivy-report.json)
+          LOW=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="LOW")] | length' trivy-report.json)
+
+          echo "## 🔍 Docker Image Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Total Vulnerabilities:** $TOTAL" >> $GITHUB_STEP_SUMMARY
+          echo "- 🚨 Critical: $CRIT" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚠️ High: $HIGH" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚠️ Medium: $MED" >> $GITHUB_STEP_SUMMARY
+          echo "- ℹ️ Low: $LOW" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛠 Mitigation Suggestions:" >> $GITHUB_STEP_SUMMARY
+          echo "- Update vulnerable packages (especially CRITICAL/HIGH)." >> $GITHUB_STEP_SUMMARY
+          echo "- Use the latest stable base image." >> $GITHUB_STEP_SUMMARY
+          echo "- Rebuild and re-scan until critical vulnerabilities = 0." >> $GITHUB_STEP_SUMMARY
